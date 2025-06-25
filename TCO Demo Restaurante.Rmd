@@ -1,0 +1,419 @@
+---
+title: "Customer Dash"
+output: 
+  flexdashboard::flex_dashboard:
+    logo: logo_insight.png
+    vertical_layout: scroll
+    theme:
+      bootswatch: spacelab   #tema predeterminado
+      navbar-bg: "#1F41AF"  #Color barra de navegación
+      navbar-light-brand-color: "#FFF" #Color letra titulo Dashboard
+      navbar-light-active-color: "#20c997"  #Color de menú seleccionado
+#      body-bg: "#F1F4F9"   #Color de fondo de la pagina
+#      info: "#FFF"  #Color letras menú principal
+      blue: "#1F41AF"
+#    css: "custom.scss"
+
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(dplyr)
+library(tibble)
+library(forcats)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(scales)
+library(lubridate)
+library(readxl)
+library(highcharter)
+library(ggplot2)
+library(gtsummary)
+library(reactable)
+library(reactablefmtr)
+library(htmltools)
+library(htmlwidgets)
+library(plotly)
+library(crosstalk)
+library(bslib)
+library(sass)
+library(bsicons)
+library(googlesheets4)
+
+#Autenticación   ------------------------------------------------------
+gs4_auth(path = "gs4_token.json",
+         scopes = "spreadsheets.readonly")
+
+#Importación   --------------------------------------------------------
+data <- read_sheet("1a6Toc8mvT2IDTyRkaNmGZqFztxUUOVziloiZyy-aPC8")
+
+
+#Clasificación de respuestas   ----------------------------------------
+# Asignación de niveles de demográficos
+data <- data %>% 
+  mutate(demo_1 = factor(demo_1, levels = c("Femenino","Masculino","Prefiero no responder")),
+         demo_2 = factor(demo_2, levels = c("Menor de 18 años",
+                                            "18 a 25 años",
+                                            "26 a 30 años",
+                                            "31 a 35 años",
+                                            "36 a 40 años",
+                                            "41 a 45 años",
+                                            "46 a 50 años",
+                                            "51 a 55 años",
+                                            "56 años o más")))
+
+#Clasificación de respuestas
+
+data <- data %>% 
+  mutate(across(starts_with("atributo"),
+         ~factor(.,levels = c(1,2,3,4,5), labels = c("negativo","negativo","neutral","positivo","positivo"))),
+         across(c(csat_q,repurchase_q,loyalty_q),
+         ~factor(.,levels = c(1,2,3,4,5), labels = c("negativo","negativo","neutral","positivo","positivo"))),
+         nps_q = factor(nps_q, levels = c(1,2,3,4,5,6,7,8,9,10), 
+                        labels = c("negativo","negativo","negativo","negativo","negativo","negativo",
+                                   "neutral","neutral","positivo","positivo")),
+         fecha = `Submitted at`- hours(6)) %>% 
+  relocate(fecha, .after = `Submitted at`)
+
+# Pesos de Indicadores en CX Index
+indicadores_pesos <- tibble(indicador = c("csat_q", "repurchase_q", "loyalty_q", "nps_q"),
+            peso =  c(0.5, 0.2, 0.2, 0.1))
+
+#Temas personalizados  ----------------------------------------
+#Highcharts
+tema_general_hc <- hc_theme_merge(
+  hc_theme_elementary(),
+  hc_theme(
+    colors = c("#3F1B87","#39C5DE","#3EF7D7","#F4F0FF","#824DF7"),
+    chart = list(
+      backgroundColor = "#FFF",
+      style = list(
+          fontFamily = "Roboto",
+          color = "#000000"),
+      zoomType = "x"
+    ),
+    title = list(
+        align = "left",
+        style = list(
+          fontFamily = "Roboto",
+          color = "#000000",
+          fontWeight = "bold")
+    ),
+    subtitle = list(
+        align = "left",
+        style = list(
+          fontFamily = "Roboto",
+          color = "#000000",
+          fontWeight = "bold")
+    )
+  )
+)
+
+#Tablas de resultados generales  ----------------------------------------
+
+#Cantidad de respuestas globales y diarias
+respuestas_totales <- data %>% 
+  count()
+
+respuestas_diario <- data %>% 
+  mutate(dias = floor_date(fecha, "day")) %>% 
+  group_by(dias) %>% 
+  count() 
+
+#Atributos
+atributos_global <- data %>%
+  select(starts_with("atributo")) %>%
+  map_dfr(
+    .f = ~ {
+      tibble(
+        segmento = levels(.x),
+        respuestas = as.integer(table(.x, useNA = "no")),
+        porcentaje = as.double(round(prop.table(table(.x, useNA = "no")) * 100, 0))
+      )
+    },
+    .id = "atributo"
+  )
+
+#Metricas Principales
+indicadores_global <- data %>%
+  select(ends_with("q")) %>%
+  map_dfr(
+    .f = ~ {
+      tibble(
+        segmento = levels(.x),
+        respuestas = as.integer(table(.x, useNA = "no")),
+        porcentaje = as.double(round(prop.table(table(.x, useNA = "no")) * 100, 0))
+      )
+    },
+    .id = "indicador"
+  )
+
+#CX Global
+cx_global <- indicadores_global %>% 
+  filter(segmento == "positivo") %>% 
+  select(indicador,porcentaje) %>% 
+  left_join(indicadores_pesos,by = "indicador") %>% 
+  pivot_wider(names_from = indicador,  values_from = c(porcentaje,peso), values_fill = 0, names_vary = "slowest") %>% 
+  rowwise() %>% 
+  mutate(cx_global = sum(porcentaje_csat_q * peso_csat_q, porcentaje_repurchase_q * peso_repurchase_q,
+                         porcentaje_loyalty_q * peso_loyalty_q, porcentaje_nps_q * peso_nps_q))
+
+# Calculos de resultados diarios
+
+atributos_diarios <- data %>%
+  mutate(dias = floor_date(fecha, "day")) %>% 
+  select(dias,starts_with("atributo")) %>%
+  nest(data = -dias) %>% 
+  mutate(
+    respuestas = map(data,function(grupos) {
+    grupos %>%
+      pivot_longer(cols = everything(), names_to = "atributo", values_to = "segmento") %>% 
+      count(atributo, segmento) %>%
+      group_by(atributo) %>%
+      mutate(porcentaje = round(n / sum(n) * 100, 0)) %>%
+      ungroup()
+    })
+  ) %>% 
+  select(-data) %>% 
+  unnest(respuestas)
+
+indicadores_diarios <- data %>%
+  mutate(dias = floor_date(fecha, "day")) %>% 
+  select(dias,ends_with("q")) %>%
+  nest(data = -dias) %>% 
+  mutate(
+    respuestas = map(data,function(grupos) {
+    grupos %>%
+      pivot_longer(cols = everything(), names_to = "indicador", values_to = "segmento") %>% 
+      count(indicador, segmento) %>%
+      group_by(indicador) %>%
+      mutate(porcentaje = round(n / sum(n) * 100, 0)) %>%
+      ungroup()
+    })
+  ) %>% 
+  select(-data) %>% 
+  unnest(respuestas)
+
+cx_diario <- indicadores_diarios %>% 
+  filter(segmento == "positivo") %>% 
+  select(dias,indicador,porcentaje) %>% 
+  left_join(indicadores_pesos,by = "indicador") %>% 
+  pivot_wider(names_from = indicador, values_from = c(porcentaje,peso), values_fill = 0, names_vary = "slowest") %>% 
+  full_join(respuestas_diario, by = "dias") %>% 
+  mutate(across(ends_with("q"), ~replace_na(.x,0))) %>% 
+  rowwise() %>% 
+  mutate(cx_global = sum(porcentaje_csat_q * peso_csat_q, porcentaje_repurchase_q * peso_repurchase_q,
+                         porcentaje_loyalty_q * peso_loyalty_q, porcentaje_nps_q * peso_nps_q)) %>% 
+  arrange(dias)
+
+
+```
+
+
+General
+======================================================================
+
+Column {data-width=150}
+-----------------------------------------------------------------------
+
+### Value Boxes {.no-title}
+
+```{r Datos principales}
+
+layout_column_wrap(
+  value_box(
+    title = "Respuestas",
+    value = respuestas_totales$n,
+    showcase = bs_icon("file-check"),
+    theme = "bg-gradient-teal-blue"),
+  value_box(
+    title = "CX Global",
+    value = paste(cx_global$cx_global,"%"),
+    showcase = bs_icon("star"),
+    theme = "bg-gradient-teal-blue"),
+  value_box(
+    title = "Satisfacción del Cliente",
+    value = paste(cx_global$porcentaje_csat_q,"%"),
+    showcase = bs_icon("award"),
+    theme = "bg-gradient-teal-blue",
+    p("CSAT Score")),
+  value_box(
+    title = "Retorno del Cliente",
+    value = paste(cx_global$porcentaje_repurchase_q,"%"),
+    showcase = bs_icon("award"),
+    theme = "bg-gradient-teal-blue",
+    p("RePurchase Score")),
+  value_box(
+    title = "Lealtad",
+    value = paste(cx_global$porcentaje_loyalty_q,"%"),
+    showcase = bs_icon("award"),
+    theme = "bg-gradient-teal-blue",
+    p("Loyalty Score")),
+  value_box(
+    title = "Red de Promotores",
+    value = paste(cx_global$porcentaje_nps_q,"%"),
+    showcase = bs_icon("award"),
+    theme = "bg-gradient-teal-blue",
+    p("NPS Score"))
+)
+
+```
+
+
+Column {data-width=450}
+-----------------------------------------------------------------------
+
+
+```{r CX tendencia diaria}
+
+layout_column_wrap(
+  width = 450,
+  height = 350,
+  card(
+    full_screen = TRUE,
+    card_body(
+      respuestas_diario %>% 
+        mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+        hchart("column", hcaes(x = tiempo, y = n), name = "Respuestas", showInLegend = TRUE, yAxis = 1, 
+               visible = FALSE, color = "#39C5DE") %>%
+        hc_add_series(type = "line",data = cx_diario %>% mutate(tiempo = dias %>% datetime_to_timestamp()),
+              hcaes(x = tiempo, y = cx_global), name = "CX Índex", color = "#3F1B87",
+              tooltip = list(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%")) %>%
+        hc_title(text = "CX Índex") %>%
+        hc_subtitle(text = "Diario") %>% 
+        hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+        hc_yAxis_multiples(list(
+          title = list(text = "CX Índex"), ceiling = 100, labels = list(format = "{text}%")),
+          list(
+          title = list(text = "Respuestas"), opposite = TRUE)
+        ) %>%
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+    ))  
+)
+
+
+```
+
+
+```{r Indicadores diarios}
+
+layout_column_wrap(
+  width = 450,
+  height = 400,
+  navset_card_pill(
+    full_screen = TRUE,
+    nav_panel(
+      title = "Satisfacción del Cliente",
+      card_body(
+          indicadores_diarios %>% 
+            filter(indicador == "csat_q",
+                   segmento == "positivo") %>% 
+            mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+            hchart("line", hcaes(x = tiempo, y = porcentaje), name = "Satisfacción del Cliente") %>%
+            hc_title(text = "Satisfacción del Cliente") %>%
+            hc_subtitle(text = "Diario") %>% 
+            hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+            hc_yAxis(title = list(text = "CSAT Score"), ceiling = 100, labels = list(format = "{text}%")) %>%
+            hc_tooltip(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%") %>% 
+            hc_add_theme(tema_general_hc) %>% 
+            hc_exporting(enabled = TRUE)
+      )),
+  nav_panel(
+      title = "Retorno del Cliente",
+      card_body(
+          indicadores_diarios %>% 
+            filter(indicador == "repurchase_q",
+                   segmento == "positivo") %>% 
+            mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+            hchart("line", hcaes(x = tiempo, y = porcentaje), name = "Satisfacción de Cliente") %>%
+            hc_title(text = "Retorno del Cliente") %>%
+            hc_subtitle(text = "Diario") %>% 
+            hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+            hc_yAxis(title = list(text = "RePurchase Score"), ceiling = 100, labels = list(format = "{text}%")) %>%
+            hc_tooltip(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%") %>% 
+            hc_add_theme(tema_general_hc) %>% 
+            hc_exporting(enabled = TRUE)
+      )),
+  nav_panel(
+      title = "Lealtad",
+      card_body(
+          indicadores_diarios %>% 
+            filter(indicador == "loyalty_q",
+                   segmento == "positivo") %>% 
+            mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+            hchart("line", hcaes(x = tiempo, y = porcentaje), name = "Lealtad") %>%
+            hc_title(text = "Lealtad") %>%
+            hc_subtitle(text = "Diario") %>% 
+            hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+            hc_yAxis(title = list(text = "Loyalty Score"), ceiling = 100, labels = list(format = "{text}%")) %>%
+            hc_tooltip(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%") %>% 
+            hc_add_theme(tema_general_hc) %>% 
+            hc_exporting(enabled = TRUE)
+      )),
+  nav_panel(
+      title = "Red de Promotores",
+      card_body(
+          indicadores_diarios %>% 
+            filter(indicador == "nps_q",
+                   segmento == "positivo") %>% 
+            mutate(tiempo = dias %>% datetime_to_timestamp()) %>% 
+            hchart("line", hcaes(x = tiempo, y = porcentaje), name = "NPS") %>%
+            hc_title(text = "Net Promoter Score") %>%
+            hc_subtitle(text = "Diario") %>% 
+            hc_xAxis(type = "datetime", labels = list(format = "{value:%d-%b}"), title = list(text = "")) %>% 
+            hc_yAxis(title = list(text = "NPS Score"), ceiling = 100, labels = list(format = "{text}%")) %>%
+            hc_tooltip(pointFormat = "<span style='color:{series.color}'>●</span> {series.name}: <b>{point.y}%") %>% 
+            hc_add_theme(tema_general_hc) %>% 
+            hc_exporting(enabled = TRUE)
+      ))
+    )  
+)
+
+
+```
+
+
+```{r, Atributos Global}
+
+layout_column_wrap(
+  width = 450,
+  height = 350,
+  card(
+    full_screen = TRUE,
+    card_body(
+      atributos_global %>%
+        mutate(porcentaje = case_when(segmento != "positivo" ~ porcentaje * -1,
+                                      .default = porcentaje)) %>% 
+        filter(porcentaje != 0) %>% 
+        hchart("bar", hcaes(x = atributo, y = porcentaje, group = segmento)) %>%
+        hc_colors(c("#3EF7D7","#39C5DE","#3F1B87"))%>%
+        hc_title(text = "Atributos Evaluados") %>%
+        # hc_subtitle(text = "") %>% 
+        hc_xAxis(title = list(text = "Atributos")) %>% 
+        hc_yAxis(title = list(text = "Score"),ceiling = 100, labels = list(format = "{text}%")) %>%
+        hc_plotOptions(bar=list(
+          stacking = "normal",
+          dataLabels=list(enabled=TRUE))) %>% 
+        hc_add_theme(tema_general_hc) %>% 
+        hc_exporting(enabled = TRUE)
+    ))  
+)
+
+
+```
+
+
+
+Segmentos
+======================================================================
+
+Row {data-height=350}
+-----------------------------------------------------------------------
+
+### Chart D
+
+```{r}
+
+```
