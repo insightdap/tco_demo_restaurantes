@@ -42,8 +42,7 @@ library(bsicons)
 library(googlesheets4)
 
 #Autenticación   ------------------------------------------------------
-gs4_auth(path = "gs4_token.json",
-         scopes = "spreadsheets.readonly")
+gs4_auth_configure(path = "gs4_token.json")
 
 #Importación   --------------------------------------------------------
 data <- read_sheet("1a6Toc8mvT2IDTyRkaNmGZqFztxUUOVziloiZyy-aPC8")
