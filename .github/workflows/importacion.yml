@@ -1,3 +1,9 @@
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
 - name: Set up Google Service Account Key
   run: |
     echo "${{ secrets.GSHEET4_ACCOUNT_KEY }}" > gs4_token.json
