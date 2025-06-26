@@ -25,4 +25,4 @@ jobs:
         cat gs4_token.json
 
     - name: Ejecutar script R
-      run: Rscript gs_script.R
+      run: Rscript 'TCO Demo Restaurante.Rmd'
