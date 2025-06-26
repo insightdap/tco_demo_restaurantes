@@ -43,7 +43,12 @@ library(googlesheets4)
 library(gargle)
 
 #Autenticación   ------------------------------------------------------
-gs4_auth(path = "gs4_token_serviceacc.json")
+try(gs4_auth(
+  path = secret_decrypt_json(
+    "gs4_token_serviceacc_enc.json",
+    key = "GS4_ACCSER_KEY"
+  )
+))
 
 #Importación   --------------------------------------------------------
 data <- read_sheet("1a6Toc8mvT2IDTyRkaNmGZqFztxUUOVziloiZyy-aPC8")
