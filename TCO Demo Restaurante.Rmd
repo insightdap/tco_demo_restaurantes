@@ -43,11 +43,7 @@ library(googlesheets4)
 library(gargle)
 
 #Autenticación   ------------------------------------------------------
-gs4_auth_configure(
-  client = gargle_oauth_client_from_json(
-  path = "gs4_token.json",
-  name = "gsheets-rstudio"
-))
+gs4_auth(path = "gs4_token_serviceacc.json")
 
 #Importación   --------------------------------------------------------
 data <- read_sheet("1a6Toc8mvT2IDTyRkaNmGZqFztxUUOVziloiZyy-aPC8")
