@@ -22,6 +22,7 @@ jobs:
     - name: Crear archivo JSON con la clave de la cuenta de servicio
       run: |
         echo "${{ secrets.GSHEET4_ACCOUNT_KEY }}" > gs4_token.json
+        cat gs4_token.json
 
     - name: Ejecutar script R
       run: Rscript gs_script.R
