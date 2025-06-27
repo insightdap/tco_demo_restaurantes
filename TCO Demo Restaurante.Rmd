@@ -40,6 +40,7 @@ library(bslib)
 library(sass)
 library(bsicons)
 library(googlesheets4)
+library(gargle)
 
 #Autenticación   ------------------------------------------------------
 try(gs4_auth(
