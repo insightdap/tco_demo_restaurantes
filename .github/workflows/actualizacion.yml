@@ -2,7 +2,7 @@ name: Actualizar README cada 1 hora
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -24,3 +24,4 @@ jobs:
           git config --global user.email "github-actions@github.com"
           git add README.md
           git diff --quiet && git diff --staged --quiet || git commit -m "Update README timestamp"
+          git push origin || echo "No changes to commit"
