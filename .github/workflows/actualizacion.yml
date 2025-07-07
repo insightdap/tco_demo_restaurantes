@@ -20,14 +20,14 @@ jobs:
         run: |
           export TZ=America/El_Salvador
           TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
-          echo "Last Deployed: $TIMESTAMP" > README.md
+          echo "Last Deployed: $TIMESTAMP" > time_file.md
 
       - name: Commit and push if changed
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git add README.md
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update README timestamp"
+          git add time_file.md
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update TIME_FILE timestamp"
           git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
