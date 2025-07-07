@@ -18,6 +18,7 @@ jobs:
 
       - name: Update README with current timestamp
         run: |
+          export TZ=America/El_Salvador
           TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
           echo "Last Deployed: $TIMESTAMP" > README.md
 
